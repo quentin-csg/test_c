@@ -289,9 +289,24 @@ def build_full_pipeline(
     if dropped > 0:
         logger.info(f"Supprimé {dropped} lignes avec trop de NaN (warmup indicateurs)")
 
+    # Sauvegarder le prix brut avant normalisation (pour le live trading)
+    dataset["raw_close"] = dataset["close"].copy()
+
     # Étape 5 : Normalisation (Phase 3)
     logger.info("Normalisation des features...")
-    dataset, scaler = normalize_features(dataset, fit=fit_scaler)
+    if fit_scaler:
+        dataset, scaler = normalize_features(dataset, fit=True)
+    else:
+        # Charger le scaler sauvegardé lors de l'entraînement
+        saved_scaler = FeatureScaler()
+        try:
+            saved_scaler.load()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Scaler non trouvé dans models/feature_scaler.pkl. "
+                "Entraînez d'abord le modèle avec: python main.py train"
+            )
+        dataset, scaler = normalize_features(dataset, scaler=saved_scaler, fit=False)
 
     logger.info(
         f"=== Pipeline terminé: {len(dataset)} lignes, "

@@ -6,7 +6,6 @@ l'agent via SubprocVecEnv multi-core avec callbacks TensorBoard et checkpoints.
 """
 
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,10 +13,9 @@ from typing import Optional
 from stable_baselines3.common.callbacks import (
     CallbackList,
     CheckpointCallback,
-    EvalCallback,
 )
 
-from agent.model import create_agent, make_env, make_vec_env, save_agent
+from agent.model import create_agent, make_vec_env, save_agent
 from config.settings import (
     CHECKPOINT_FREQ,
     FRAME_STACK_SIZE,
@@ -79,6 +77,13 @@ def train(
         end=train_end,
         include_nlp=include_nlp,
     )
+
+    if dataset.empty:
+        raise RuntimeError(
+            f"Pipeline a retourné un dataset vide pour {train_start} → {train_end}. "
+            "Vérifiez la connexion internet et les dates."
+        )
+
     print(f"  → {len(dataset)} bougies, {len(dataset.columns)} colonnes")
 
     # Sauvegarder le scaler pour réutilisation en backtest/live

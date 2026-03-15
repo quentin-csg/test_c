@@ -43,10 +43,10 @@ class TestCryptoFetcher:
             assert len(df) > 0
 
     def test_fetch_ohlcv_empty_on_invalid_symbol(self):
-        """fetch_ohlcv lève une exception pour un symbol invalide."""
+        """fetch_ohlcv retourne un DataFrame vide pour un symbol invalide."""
         from data.crypto_fetcher import fetch_ohlcv
-        with pytest.raises(Exception):
-            fetch_ohlcv("INVALID/PAIR", "1h", since="2024-01-01", until="2024-01-02")
+        result = fetch_ohlcv("INVALID/PAIR", "1h", since="2024-01-01", until="2024-01-02")
+        assert result.empty
 
     def test_order_book_structure(self):
         """fetch_order_book retourne un dict avec les clés attendues."""

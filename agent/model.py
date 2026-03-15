@@ -18,7 +18,6 @@ from stable_baselines3.common.vec_env import (
     DummyVecEnv,
     SubprocVecEnv,
     VecFrameStack,
-    VecNormalize,
 )
 
 from config.settings import (
@@ -207,6 +206,14 @@ def load_agent(
     """
     load_dir = path or MODELS_DIR
     filepath = load_dir / name
+
+    zip_path = Path(f"{filepath}.zip")
+    if not zip_path.exists():
+        raise FileNotFoundError(
+            f"Modèle introuvable: {zip_path}. "
+            f"Entraînez d'abord avec: python main.py train --model {name}"
+        )
+
     agent = PPO.load(str(filepath), env=env)
     logger.info(f"Agent chargé: {filepath}.zip")
     return agent

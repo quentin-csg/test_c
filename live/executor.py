@@ -31,7 +31,6 @@ from config.settings import (
 )
 from data.pipeline import build_full_pipeline
 from training.logger import (
-    append_monthly_csv,
     append_weekly_csv,
     log_weekly_summary,
     print_stats,
@@ -51,11 +50,11 @@ class PaperPortfolio:
         self.total_trades = 0
         self.total_fees = 0.0
         self.trade_history: list[dict] = []
+        self.last_price = 0.0  # dernier prix connu (pour arrêt propre)
 
-    @property
-    def net_worth(self) -> float:
-        """Valeur totale du portefeuille."""
-        return self.balance + self.position * self.entry_price
+    def net_worth(self, current_price: float) -> float:
+        """Valeur totale du portefeuille au prix courant."""
+        return self.balance + self.position * current_price
 
     def execute_order(self, action: float, current_price: float) -> dict:
         """
@@ -68,6 +67,8 @@ class PaperPortfolio:
         Returns:
             Dict avec les détails de l'ordre
         """
+        self.last_price = current_price
+
         order_info = {
             "timestamp": datetime.now().isoformat(),
             "action": float(action),
@@ -83,9 +84,15 @@ class PaperPortfolio:
             net_amount = buy_amount_usdt - fee
             btc_bought = net_amount / current_price
 
+            # Moyenner le prix d'entrée si position existante
+            if self.position > 0:
+                total_value = self.position * self.entry_price + btc_bought * current_price
+                self.entry_price = total_value / (self.position + btc_bought)
+            else:
+                self.entry_price = current_price
+
             self.balance -= buy_amount_usdt
             self.position += btc_bought
-            self.entry_price = current_price
             self.total_fees += fee
             self.total_trades += 1
 
@@ -181,22 +188,38 @@ class LiveExecutor:
 
         Returns:
             Tuple (DataFrame normalisé, FeatureScaler)
+
+        Raises:
+            RuntimeError: si les données sont vides ou insuffisantes
         """
-        # Récupérer les 500 dernières bougies pour avoir assez de données
-        # pour les indicateurs techniques (SMA200 a besoin de 200+ bougies)
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
-        dataset, scaler = build_full_pipeline(
-            start=start,
-            end=end,
-            include_nlp=self.include_nlp,
-            fit_scaler=False,
-        )
+        try:
+            dataset, scaler = build_full_pipeline(
+                start=start,
+                end=end,
+                include_nlp=self.include_nlp,
+                fit_scaler=False,
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "Scaler non trouvé. Entraînez d'abord le modèle "
+                "avec: python main.py train"
+            ) from e
+
+        if dataset.empty:
+            raise RuntimeError(
+                f"Aucune donnée récupérée pour {start} → {end}. "
+                "Vérifiez la connexion internet."
+            )
+
         return dataset, scaler
 
     def _get_current_price(self, df: pd.DataFrame) -> float:
-        """Récupère le prix actuel depuis le DataFrame."""
+        """Récupère le prix réel (non normalisé) depuis le DataFrame."""
+        if "raw_close" in df.columns:
+            return float(df["raw_close"].iloc[-1])
         return float(df["close"].iloc[-1])
 
     def _execute_live_order(self, action: float, current_price: float) -> dict:
@@ -261,7 +284,16 @@ class LiveExecutor:
             use_subproc=False,
             frame_stack=self.frame_stack,
         )
-        agent = load_agent(vec_env, name=self.model_name)
+
+        try:
+            agent = load_agent(vec_env, name=self.model_name)
+        except Exception as e:
+            vec_env.close()
+            raise RuntimeError(
+                f"Impossible de charger le modèle '{self.model_name}'. "
+                f"Vérifiez que models/{self.model_name}.zip existe. "
+                f"Erreur: {e}"
+            ) from e
 
         # 3. Prédiction : on prend la dernière observation
         obs = vec_env.reset()
@@ -353,7 +385,9 @@ class LiveExecutor:
             self.running = False
             if not self.live_mode:
                 # Sauvegarder les stats finales
-                stats = self.paper_portfolio.get_stats(0)
+                stats = self.paper_portfolio.get_stats(
+                    self.paper_portfolio.last_price
+                )
                 print_stats(stats, title=f"Résultat final ({mode_str})")
 
                 # Log dans les fichiers live

@@ -66,9 +66,13 @@ def fetch_ohlcv(
     logger.info(f"Fetching {symbol} {timeframe} depuis {since or 'le début'}...")
 
     while True:
-        ohlcv = exchange.fetch_ohlcv(
-            symbol, timeframe, since=since_ms, limit=1000
-        )
+        try:
+            ohlcv = exchange.fetch_ohlcv(
+                symbol, timeframe, since=since_ms, limit=1000
+            )
+        except Exception as e:
+            logger.error(f"Erreur fetch_ohlcv {symbol}: {e}")
+            break
         if not ohlcv:
             break
 

@@ -28,6 +28,7 @@ EXCLUDE_COLUMNS = [
     "n_positive",
     "n_negative",
     "n_neutral",
+    "raw_close",
 ]
 
 

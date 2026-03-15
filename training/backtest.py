@@ -15,7 +15,6 @@ import numpy as np
 from agent.model import load_agent, make_vec_env
 from config.settings import (
     FRAME_STACK_SIZE,
-    MODELS_DIR,
     TEST_END,
     TEST_START,
 )
@@ -59,8 +58,15 @@ def backtest(
         start=test_start,
         end=test_end,
         include_nlp=include_nlp,
-        fit_scaler=True,
+        fit_scaler=False,
     )
+
+    if dataset.empty:
+        raise RuntimeError(
+            f"Pipeline a retourné un dataset vide pour {test_start} → {test_end}. "
+            "Vérifiez la connexion internet et les dates."
+        )
+
     print(f"  → {len(dataset)} bougies, {len(dataset.columns)} colonnes")
 
     # 2. Créer l'environnement
@@ -75,10 +81,14 @@ def backtest(
 
     # 3. Charger le modèle
     print(f"[3/4] Chargement du modèle: {model_name}...")
-    agent = load_agent(vec_env, name=model_name)
+    try:
+        agent = load_agent(vec_env, name=model_name)
+    except FileNotFoundError:
+        vec_env.close()
+        raise
 
     # 4. Exécuter le backtest
-    print(f"[4/4] Exécution du backtest...")
+    print(f"[4/4] Exécution du backtest ({len(dataset)} steps)...")
     obs = vec_env.reset()
     terminated = False
     total_steps = 0
@@ -90,11 +100,24 @@ def backtest(
         rewards.append(reward[0])
         total_steps += 1
         terminated = dones[0]
+        if terminated:
+            terminal_info = infos[0]
 
-    # Récupérer les stats du portfolio (unwrap VecFrameStack → DummyVecEnv → TradingEnv)
-    inner_vec = vec_env.venv  # DummyVecEnv inside VecFrameStack
-    trading_env = inner_vec.envs[0]
-    stats = trading_env.get_portfolio_stats()
+    # Récupérer les stats depuis l'info terminale (AVANT auto-reset du VecEnv)
+    # VecEnv auto-reset l'env quand done=True, donc env.get_portfolio_stats()
+    # retournerait les stats de l'épisode reset, pas celles du backtest.
+    stats = terminal_info.get("portfolio_stats", {})
+    if not stats:
+        logger.warning(
+            "portfolio_stats absent de l'info terminale, "
+            "fallback sur l'info de base"
+        )
+        stats = {
+            "net_worth": terminal_info.get("net_worth", 0),
+            "total_trades": terminal_info.get("total_trades", 0),
+            "total_fees": terminal_info.get("total_fees", 0),
+            "total_return_pct": 0.0,
+        }
 
     # Ajouter des métriques supplémentaires
     stats["model_name"] = model_name
@@ -103,7 +126,7 @@ def backtest(
     stats["total_steps"] = total_steps
     stats["avg_reward"] = float(np.mean(rewards))
     stats["total_reward"] = float(np.sum(rewards))
-    stats["feature_columns"] = feature_columns or list(trading_env.feature_columns)
+    stats["feature_columns"] = feature_columns or list(dataset.columns)
 
     # Afficher les résultats
     print_stats(stats, title=f"Backtest: {model_name}")
