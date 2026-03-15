@@ -23,10 +23,9 @@ from agent.model import create_agent, make_vec_env, save_agent
 from config.settings import LOGS_DIR, MODELS_DIR
 from env.trading_env import TradingEnv
 from training.logger import (
-    BACKTEST_LOG_DIR,
     MONTHLY_CSV_COLUMNS,
     WEEKLY_CSV_COLUMNS,
-    WEEKLY_LOG_DIR,
+    _get_dirs,
     append_monthly_csv,
     append_weekly_csv,
     log_backtest_result,
@@ -102,7 +101,7 @@ class TestLogger:
 
     def test_log_weekly_summary(self, tmp_logs_dir):
         """Sauvegarde et lit un résumé hebdomadaire."""
-        with patch("training.logger.WEEKLY_LOG_DIR", tmp_logs_dir):
+        with patch("training.logger.LOGS_TRAIN_DIR", tmp_logs_dir):
             stats = {"pnl": 150.5, "sharpe": 1.2, "trades": 42}
             filepath = log_weekly_summary(stats, week_label="2024_W01")
 
@@ -116,14 +115,14 @@ class TestLogger:
 
     def test_log_weekly_auto_label(self, tmp_logs_dir):
         """Génère automatiquement le label de semaine."""
-        with patch("training.logger.WEEKLY_LOG_DIR", tmp_logs_dir):
+        with patch("training.logger.LOGS_TRAIN_DIR", tmp_logs_dir):
             filepath = log_weekly_summary({"pnl": 0})
             assert filepath.exists()
             assert "week_" in filepath.name
 
     def test_log_backtest_result(self, tmp_logs_dir):
         """Sauvegarde un résultat de backtest."""
-        with patch("training.logger.BACKTEST_LOG_DIR", tmp_logs_dir):
+        with patch("training.logger.LOGS_TRAIN_DIR", tmp_logs_dir):
             stats = {
                 "total_return_pct": 5.2,
                 "sharpe_ratio": 1.1,
@@ -140,7 +139,7 @@ class TestLogger:
 
     def test_load_backtest_results(self, tmp_logs_dir):
         """Charge et filtre les résultats de backtest."""
-        with patch("training.logger.BACKTEST_LOG_DIR", tmp_logs_dir):
+        with patch("training.logger.LOGS_TRAIN_DIR", tmp_logs_dir):
             # Créer 2 résultats
             log_backtest_result({"pnl": 100}, model_name="modelA", run_name="r1")
             log_backtest_result({"pnl": 200}, model_name="modelB", run_name="r2")
@@ -449,7 +448,7 @@ class TestIntegration:
             "total_trades": np.int64(15),
         }
 
-        with patch("training.logger.BACKTEST_LOG_DIR", tmp_path):
+        with patch("training.logger.LOGS_TRAIN_DIR", tmp_path):
             filepath = log_backtest_result(
                 stats, model_name="test", run_name="run1"
             )

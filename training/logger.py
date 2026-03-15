@@ -1,7 +1,9 @@
 """
 Système de logs pour le trading bot.
-  - Résumé hebdomadaire (PnL, nb trades, Sharpe) dans logs/
-  - Intégration TensorBoard
+  - Résumé hebdomadaire JSON + CSV cumulatif
+  - Résumé mensuel CSV cumulatif
+  - Résultats de backtest JSON
+  - Séparation logs/train/ et logs/live/
 """
 
 import csv
@@ -9,19 +11,28 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 
-from config.settings import LOGS_DIR
+from config.settings import LOGS_TRAIN_DIR, LOGS_LIVE_DIR
 
 logger = logging.getLogger(__name__)
 
-# Sous-dossiers de logs
-WEEKLY_LOG_DIR = LOGS_DIR / "weekly"
-BACKTEST_LOG_DIR = LOGS_DIR / "backtests"
-WEEKLY_CSV_PATH = LOGS_DIR / "weekly_summary.csv"
-MONTHLY_CSV_PATH = LOGS_DIR / "monthly_summary.csv"
+Mode = Literal["train", "live"]
+
+
+def _get_dirs(mode: Mode = "train") -> dict[str, Path]:
+    """Retourne les chemins de logs pour un mode donné."""
+    base = LOGS_TRAIN_DIR if mode == "train" else LOGS_LIVE_DIR
+    return {
+        "weekly": base / "weekly",
+        "backtests": base / "backtests",
+        "weekly_csv": base / "weekly_summary.csv",
+        "monthly_csv": base / "monthly_summary.csv",
+        "tensorboard": base / "tensorboard",
+    }
+
 
 WEEKLY_CSV_COLUMNS = [
     "week",
@@ -56,15 +67,18 @@ MONTHLY_CSV_COLUMNS = [
 ]
 
 
-def _ensure_dirs():
+def _ensure_dirs(mode: Mode = "train"):
     """Crée les dossiers de logs si nécessaire."""
-    WEEKLY_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    BACKTEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    dirs = _get_dirs(mode)
+    dirs["weekly"].mkdir(parents=True, exist_ok=True)
+    dirs["backtests"].mkdir(parents=True, exist_ok=True)
+    dirs["tensorboard"].mkdir(parents=True, exist_ok=True)
 
 
 def log_weekly_summary(
     stats: dict,
     week_label: Optional[str] = None,
+    mode: Mode = "train",
 ) -> Path:
     """
     Sauvegarde un résumé hebdomadaire au format JSON.
@@ -72,21 +86,24 @@ def log_weekly_summary(
     Args:
         stats: dict de métriques (PnL, Sharpe, trades, etc.)
         week_label: label de la semaine (auto-généré si None)
+        mode: "train" ou "live"
 
     Returns:
         Chemin du fichier sauvegardé
     """
-    _ensure_dirs()
+    _ensure_dirs(mode)
+    dirs = _get_dirs(mode)
 
     if week_label is None:
         now = datetime.now()
         week_label = f"{now.year}_W{now.isocalendar()[1]:02d}"
 
-    filepath = WEEKLY_LOG_DIR / f"week_{week_label}.json"
+    filepath = dirs["weekly"] / f"week_{week_label}.json"
 
     entry = {
         "week": week_label,
         "timestamp": datetime.now().isoformat(),
+        "mode": mode,
         **{k: _serialize(v) for k, v in stats.items()},
     }
 
@@ -100,37 +117,40 @@ def log_weekly_summary(
 def append_weekly_csv(
     stats: dict,
     week_label: Optional[str] = None,
+    mode: Mode = "train",
     csv_path: Optional[Path] = None,
 ) -> Path:
     """
     Ajoute une ligne au CSV cumulatif hebdomadaire.
 
     Args:
-        stats: dict de métriques (doit contenir les clés de WEEKLY_CSV_COLUMNS)
+        stats: dict de métriques
         week_label: label de la semaine (auto-généré si None)
-        csv_path: chemin du CSV (défaut: logs/weekly_summary.csv)
+        mode: "train" ou "live"
+        csv_path: chemin du CSV (auto si None)
 
     Returns:
         Chemin du fichier CSV
     """
     if csv_path is None:
-        csv_path = WEEKLY_CSV_PATH
+        csv_path = _get_dirs(mode)["weekly_csv"]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     if week_label is None:
         now = datetime.now()
         week_label = f"{now.year}_W{now.isocalendar()[1]:02d}"
 
-    # Construire la ligne avec les colonnes attendues
     row = {
         "week": week_label,
         "timestamp": datetime.now().isoformat(),
     }
     for col in WEEKLY_CSV_COLUMNS:
         if col not in row:
-            row[col] = _serialize(stats.get(col, ""))
+            val = stats.get(col, "")
+            if col == "mode" and val == "":
+                val = mode
+            row[col] = _serialize(val)
 
-    # Créer le fichier avec header si nécessaire, sinon append
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
     with open(csv_path, "a", newline="", encoding="utf-8") as f:
@@ -146,21 +166,23 @@ def append_weekly_csv(
 def append_monthly_csv(
     stats: dict,
     month_label: Optional[str] = None,
+    mode: Mode = "train",
     csv_path: Optional[Path] = None,
 ) -> Path:
     """
     Ajoute une ligne au CSV cumulatif mensuel.
 
     Args:
-        stats: dict de métriques (doit contenir les clés de MONTHLY_CSV_COLUMNS)
+        stats: dict de métriques
         month_label: label du mois ex: "2026_03" (auto-généré si None)
-        csv_path: chemin du CSV (défaut: logs/monthly_summary.csv)
+        mode: "train" ou "live"
+        csv_path: chemin du CSV (auto si None)
 
     Returns:
         Chemin du fichier CSV
     """
     if csv_path is None:
-        csv_path = MONTHLY_CSV_PATH
+        csv_path = _get_dirs(mode)["monthly_csv"]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     if month_label is None:
@@ -173,7 +195,10 @@ def append_monthly_csv(
     }
     for col in MONTHLY_CSV_COLUMNS:
         if col not in row:
-            row[col] = _serialize(stats.get(col, ""))
+            val = stats.get(col, "")
+            if col == "mode" and val == "":
+                val = mode
+            row[col] = _serialize(val)
 
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
@@ -191,6 +216,7 @@ def log_backtest_result(
     stats: dict,
     model_name: str = "ppo_trading",
     run_name: Optional[str] = None,
+    mode: Mode = "train",
 ) -> Path:
     """
     Sauvegarde les résultats d'un backtest au format JSON.
@@ -199,20 +225,23 @@ def log_backtest_result(
         stats: dict de métriques du backtest
         model_name: nom du modèle utilisé
         run_name: nom du run (auto-généré si None)
+        mode: "train" ou "live"
 
     Returns:
         Chemin du fichier sauvegardé
     """
-    _ensure_dirs()
+    _ensure_dirs(mode)
+    dirs = _get_dirs(mode)
 
     if run_name is None:
         run_name = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    filepath = BACKTEST_LOG_DIR / f"backtest_{model_name}_{run_name}.json"
+    filepath = dirs["backtests"] / f"backtest_{model_name}_{run_name}.json"
 
     entry = {
         "run_name": run_name,
         "model_name": model_name,
+        "mode": mode,
         "timestamp": datetime.now().isoformat(),
         **{k: _serialize(v) for k, v in stats.items()},
     }
@@ -224,20 +253,25 @@ def log_backtest_result(
     return filepath
 
 
-def load_backtest_results(model_name: Optional[str] = None) -> list[dict]:
+def load_backtest_results(
+    model_name: Optional[str] = None,
+    mode: Mode = "train",
+) -> list[dict]:
     """
     Charge tous les résultats de backtest pour comparaison.
 
     Args:
         model_name: filtrer par nom de modèle (None = tous)
+        mode: "train" ou "live"
 
     Returns:
         Liste de dicts de résultats, triés par date
     """
-    _ensure_dirs()
+    _ensure_dirs(mode)
+    dirs = _get_dirs(mode)
     results = []
 
-    for filepath in sorted(BACKTEST_LOG_DIR.glob("backtest_*.json")):
+    for filepath in sorted(dirs["backtests"].glob("backtest_*.json")):
         if model_name and model_name not in filepath.name:
             continue
         with open(filepath, "r", encoding="utf-8") as f:

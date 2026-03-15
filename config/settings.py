@@ -113,7 +113,11 @@ TEST_END = None                    # None = jusqu'à aujourd'hui
 TOTAL_TIMESTEPS = 1_000_000        # Nombre total de pas d'entraînement
 N_ENVS = 4                        # Nombre d'environnements parallèles (SubprocVecEnv)
 CHECKPOINT_FREQ = 50_000           # Sauvegarde du modèle tous les N pas
-TENSORBOARD_LOG_DIR = str(LOGS_DIR / "tensorboard")
+
+# Logs séparés train / live
+LOGS_TRAIN_DIR = LOGS_DIR / "train"
+LOGS_LIVE_DIR = LOGS_DIR / "live"
+TENSORBOARD_LOG_DIR = str(LOGS_TRAIN_DIR / "tensorboard")
 
 # =============================================================================
 # LIVE / PAPER TRADING
