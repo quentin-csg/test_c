@@ -208,4 +208,4 @@ print(_serialize("texte"), type(_serialize("texte")))
 ```
 python -m pytest tests/ -v
 ```
-- [X ] 90/90 tests passent (16 data + 22 features + 30 env + 10 agent + 12 training)
+- [X] 90/90 tests passent (16 data + 22 features + 30 env + 10 agent + 12 training)

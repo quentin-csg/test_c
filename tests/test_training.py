@@ -5,6 +5,7 @@ Ces tests vérifient les fonctionnalités sans lancer de vrai entraînement long
 On utilise des micro-datasets et des timesteps très courts.
 """
 
+import csv
 import json
 import shutil
 import tempfile
@@ -23,7 +24,11 @@ from config.settings import LOGS_DIR, MODELS_DIR
 from env.trading_env import TradingEnv
 from training.logger import (
     BACKTEST_LOG_DIR,
+    MONTHLY_CSV_COLUMNS,
+    WEEKLY_CSV_COLUMNS,
     WEEKLY_LOG_DIR,
+    append_monthly_csv,
+    append_weekly_csv,
     log_backtest_result,
     log_weekly_summary,
     load_backtest_results,
@@ -165,6 +170,113 @@ class TestLogger:
         assert "Test" in captured.out
         assert "pnl" in captured.out
         assert "123.4567" in captured.out
+
+    def test_append_weekly_csv_creates_file(self, tmp_logs_dir):
+        """Crée le CSV avec header à la première écriture."""
+        csv_path = tmp_logs_dir / "weekly_summary.csv"
+        stats = {
+            "model_name": "v1_test",
+            "pnl_usdt": 150.0,
+            "pnl_cumul_usdt": 150.0,
+            "net_worth": 10150.0,
+            "total_return_pct": 1.5,
+            "sharpe_ratio": 1.2,
+            "sortino_ratio": 1.5,
+            "max_drawdown_pct": 0.8,
+            "total_trades": 12,
+            "total_fees": 3.5,
+            "mode": "paper",
+        }
+        append_weekly_csv(stats, week_label="2026_W11", csv_path=csv_path)
+
+        assert csv_path.exists()
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["week"] == "2026_W11"
+        assert rows[0]["pnl_usdt"] == "150.0"
+        assert rows[0]["model_name"] == "v1_test"
+
+    def test_append_weekly_csv_cumulative(self, tmp_logs_dir):
+        """Ajoute des lignes sans écraser les précédentes."""
+        csv_path = tmp_logs_dir / "weekly_summary.csv"
+        for i, week in enumerate(["2026_W10", "2026_W11", "2026_W12"]):
+            stats = {
+                "model_name": "v1",
+                "pnl_usdt": 100.0 * (i + 1),
+                "pnl_cumul_usdt": sum(100.0 * (j + 1) for j in range(i + 1)),
+                "net_worth": 10000 + 100.0 * (i + 1),
+                "total_return_pct": 1.0 * (i + 1),
+                "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "max_drawdown_pct": 0.0,
+                "total_trades": 5,
+                "total_fees": 1.0,
+                "mode": "paper",
+            }
+            append_weekly_csv(stats, week_label=week, csv_path=csv_path)
+
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 3
+        assert rows[0]["week"] == "2026_W10"
+        assert rows[2]["week"] == "2026_W12"
+        assert rows[2]["pnl_cumul_usdt"] == "600.0"
+
+    def test_append_monthly_csv_creates_file(self, tmp_logs_dir):
+        """Crée le CSV mensuel avec header à la première écriture."""
+        csv_path = tmp_logs_dir / "monthly_summary.csv"
+        stats = {
+            "model_name": "v1_test",
+            "pnl_usdt": 500.0,
+            "pnl_cumul_usdt": 500.0,
+            "net_worth": 10500.0,
+            "total_return_pct": 5.0,
+            "sharpe_ratio": 1.0,
+            "sortino_ratio": 1.3,
+            "max_drawdown_pct": 2.1,
+            "total_trades": 45,
+            "total_fees": 12.0,
+            "mode": "paper",
+        }
+        append_monthly_csv(stats, month_label="2026_03", csv_path=csv_path)
+
+        assert csv_path.exists()
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["month"] == "2026_03"
+        assert rows[0]["pnl_usdt"] == "500.0"
+
+    def test_append_monthly_csv_cumulative(self, tmp_logs_dir):
+        """Ajoute des lignes mensuelles sans écraser."""
+        csv_path = tmp_logs_dir / "monthly_summary.csv"
+        for i, month in enumerate(["2026_01", "2026_02", "2026_03"]):
+            stats = {
+                "model_name": "v1",
+                "pnl_usdt": 200.0 * (i + 1),
+                "pnl_cumul_usdt": sum(200.0 * (j + 1) for j in range(i + 1)),
+                "net_worth": 10000 + 200.0 * (i + 1),
+                "total_return_pct": 2.0 * (i + 1),
+                "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "max_drawdown_pct": 0.0,
+                "total_trades": 20,
+                "total_fees": 5.0,
+                "mode": "paper",
+            }
+            append_monthly_csv(stats, month_label=month, csv_path=csv_path)
+
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 3
+        assert rows[0]["month"] == "2026_01"
+        assert rows[2]["month"] == "2026_03"
+        assert rows[2]["pnl_cumul_usdt"] == "1200.0"
 
 
 # ============================================================================

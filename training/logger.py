@@ -4,6 +4,7 @@ Système de logs pour le trading bot.
   - Intégration TensorBoard
 """
 
+import csv
 import json
 import logging
 from datetime import datetime
@@ -19,6 +20,40 @@ logger = logging.getLogger(__name__)
 # Sous-dossiers de logs
 WEEKLY_LOG_DIR = LOGS_DIR / "weekly"
 BACKTEST_LOG_DIR = LOGS_DIR / "backtests"
+WEEKLY_CSV_PATH = LOGS_DIR / "weekly_summary.csv"
+MONTHLY_CSV_PATH = LOGS_DIR / "monthly_summary.csv"
+
+WEEKLY_CSV_COLUMNS = [
+    "week",
+    "timestamp",
+    "model_name",
+    "pnl_usdt",
+    "pnl_cumul_usdt",
+    "net_worth",
+    "total_return_pct",
+    "sharpe_ratio",
+    "sortino_ratio",
+    "max_drawdown_pct",
+    "total_trades",
+    "total_fees",
+    "mode",
+]
+
+MONTHLY_CSV_COLUMNS = [
+    "month",
+    "timestamp",
+    "model_name",
+    "pnl_usdt",
+    "pnl_cumul_usdt",
+    "net_worth",
+    "total_return_pct",
+    "sharpe_ratio",
+    "sortino_ratio",
+    "max_drawdown_pct",
+    "total_trades",
+    "total_fees",
+    "mode",
+]
 
 
 def _ensure_dirs():
@@ -60,6 +95,96 @@ def log_weekly_summary(
 
     logger.info(f"Résumé hebdomadaire sauvegardé: {filepath}")
     return filepath
+
+
+def append_weekly_csv(
+    stats: dict,
+    week_label: Optional[str] = None,
+    csv_path: Optional[Path] = None,
+) -> Path:
+    """
+    Ajoute une ligne au CSV cumulatif hebdomadaire.
+
+    Args:
+        stats: dict de métriques (doit contenir les clés de WEEKLY_CSV_COLUMNS)
+        week_label: label de la semaine (auto-généré si None)
+        csv_path: chemin du CSV (défaut: logs/weekly_summary.csv)
+
+    Returns:
+        Chemin du fichier CSV
+    """
+    if csv_path is None:
+        csv_path = WEEKLY_CSV_PATH
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if week_label is None:
+        now = datetime.now()
+        week_label = f"{now.year}_W{now.isocalendar()[1]:02d}"
+
+    # Construire la ligne avec les colonnes attendues
+    row = {
+        "week": week_label,
+        "timestamp": datetime.now().isoformat(),
+    }
+    for col in WEEKLY_CSV_COLUMNS:
+        if col not in row:
+            row[col] = _serialize(stats.get(col, ""))
+
+    # Créer le fichier avec header si nécessaire, sinon append
+    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=WEEKLY_CSV_COLUMNS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+    logger.info(f"Ligne ajoutée au CSV hebdomadaire: {csv_path}")
+    return csv_path
+
+
+def append_monthly_csv(
+    stats: dict,
+    month_label: Optional[str] = None,
+    csv_path: Optional[Path] = None,
+) -> Path:
+    """
+    Ajoute une ligne au CSV cumulatif mensuel.
+
+    Args:
+        stats: dict de métriques (doit contenir les clés de MONTHLY_CSV_COLUMNS)
+        month_label: label du mois ex: "2026_03" (auto-généré si None)
+        csv_path: chemin du CSV (défaut: logs/monthly_summary.csv)
+
+    Returns:
+        Chemin du fichier CSV
+    """
+    if csv_path is None:
+        csv_path = MONTHLY_CSV_PATH
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if month_label is None:
+        now = datetime.now()
+        month_label = f"{now.year}_{now.month:02d}"
+
+    row = {
+        "month": month_label,
+        "timestamp": datetime.now().isoformat(),
+    }
+    for col in MONTHLY_CSV_COLUMNS:
+        if col not in row:
+            row[col] = _serialize(stats.get(col, ""))
+
+    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=MONTHLY_CSV_COLUMNS)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+
+    logger.info(f"Ligne ajoutée au CSV mensuel: {csv_path}")
+    return csv_path
 
 
 def log_backtest_result(

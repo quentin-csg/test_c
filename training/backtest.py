@@ -103,6 +103,7 @@ def backtest(
     stats["total_steps"] = total_steps
     stats["avg_reward"] = float(np.mean(rewards))
     stats["total_reward"] = float(np.sum(rewards))
+    stats["feature_columns"] = feature_columns or list(trading_env.feature_columns)
 
     # Afficher les résultats
     print_stats(stats, title=f"Backtest: {model_name}")
