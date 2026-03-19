@@ -5,6 +5,7 @@ aligné temporellement sur le timeframe 1h.
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
