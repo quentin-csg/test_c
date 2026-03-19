@@ -10,6 +10,7 @@ Boucle principale qui s'exécute toutes les heures :
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -171,10 +172,14 @@ class LiveExecutor:
         self.feature_columns = MODEL_FEATURES
         self._load_model()
 
-        # Exchange ccxt (utilisé en mode live)
+        # Exchange ccxt (live: avec auth, paper: public uniquement)
         self.exchange = None
         if self.live_mode:
             self._init_exchange()
+        else:
+            # Exchange public (sans auth) pour la mise à jour du prix toutes les 10s
+            exchange_class = getattr(ccxt, EXCHANGE)
+            self.exchange = exchange_class({"enableRateLimit": True})
 
         mode_str = "LIVE" if self.live_mode else "PAPER"
         logger.info(f"LiveExecutor initialisé en mode {mode_str}")
@@ -464,6 +469,68 @@ class LiveExecutor:
             "timestamp": datetime.now().isoformat(),
         }
 
+    def _price_update_loop(self, interval_seconds: int = 10) -> None:
+        """
+        Thread background : met à jour le prix BTC dans live_state.json
+        toutes les `interval_seconds` secondes, sans déclencher de trade.
+        """
+        state_path = LOGS_LIVE_DIR / "live_state.json"
+        while self.running:
+            try:
+                current_price = float(
+                    self.exchange.fetch_ticker(self.symbol)["last"]
+                )
+                if state_path.exists():
+                    with open(state_path, "r", encoding="utf-8") as f:
+                        state = json.load(f)
+
+                    # Mettre à jour le prix et l'historique
+                    state["current_price"] = current_price
+                    state["last_updated"] = datetime.now().isoformat()
+
+                    price_history = state.get("price_history", [])
+                    price_history.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "price": current_price,
+                    })
+                    # Garder seulement les 7 derniers jours (168h × 6 points/h = ~1000)
+                    state["price_history"] = price_history[-1000:]
+
+                    # Recalculer les métriques portfolio avec le prix live
+                    portfolio = state.get("portfolio", {})
+                    position_btc = portfolio.get("position_btc", 0.0)
+                    balance_usdt = portfolio.get("balance_usdt", 0.0)
+                    if position_btc > 0:
+                        position_usdt = position_btc * current_price
+                        net_worth = balance_usdt + position_usdt
+                        portfolio["position_usdt"] = round(position_usdt, 4)
+                        portfolio["net_worth"] = round(net_worth, 4)
+                        portfolio["total_return_pct"] = round(
+                            (net_worth - INITIAL_BALANCE) / INITIAL_BALANCE * 100, 4
+                        )
+                        state["portfolio"] = portfolio
+
+                    # Recalculer PnL latent des positions ouvertes
+                    open_positions = state.get("open_positions", [])
+                    for pos in open_positions:
+                        entry = pos.get("entry_price", 0)
+                        if entry > 0:
+                            pos["unrealized_pnl_pct"] = round(
+                                (current_price - entry) / entry * 100, 4
+                            )
+                            pos["value_usdt"] = round(
+                                pos.get("amount_btc", 0) * current_price, 4
+                            )
+                    state["open_positions"] = open_positions
+
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump(state, f, indent=2, default=str)
+
+            except Exception as e:
+                logger.debug(f"Price updater: {e}")
+
+            time.sleep(interval_seconds)
+
     def run(self):
         """Boucle principale — exécute un tick toutes les heures."""
         mode_str = "LIVE" if self.live_mode else "PAPER"
@@ -475,6 +542,14 @@ class LiveExecutor:
 
         self.running = True
         tick_count = 0
+
+        # Thread background : mise à jour du prix toutes les 10s
+        price_thread = threading.Thread(
+            target=self._price_update_loop,
+            args=(10,),
+            daemon=True,
+        )
+        price_thread.start()
 
         try:
             while self.running:

@@ -263,25 +263,30 @@ class TestLiveExecutor:
 
     def test_init_paper_mode(self):
         """Initialisation en mode paper."""
-        executor = LiveExecutor(
-            model_name="test",
-            live_mode=False,
-        )
-        assert executor.live_mode is False
-        assert executor.paper_portfolio is not None
-        assert executor.exchange is None
+        with patch.object(LiveExecutor, "_load_model"):
+            executor = LiveExecutor(
+                model_name="test",
+                live_mode=False,
+            )
+            assert executor.live_mode is False
+            assert executor.paper_portfolio is not None
+            # En mode paper, exchange est initialisé sans auth (pour les prix publics)
+            assert executor.exchange is not None
 
     def test_init_live_mode_no_keys(self):
         """Mode live sans API keys lève une erreur."""
-        with patch("live.executor.API_KEY", ""), \
+        with patch.object(LiveExecutor, "_load_model"), \
+             patch("live.executor.API_KEY", ""), \
              patch("live.executor.API_SECRET", ""):
             with pytest.raises(ValueError, match="API_KEY"):
                 LiveExecutor(model_name="test", live_mode=True)
 
     def test_paper_portfolio_in_executor(self):
         """L'exécuteur utilise le paper portfolio."""
-        executor = LiveExecutor(model_name="test", live_mode=False)
-        assert executor.paper_portfolio.balance == 10000.0
+        from config.settings import INITIAL_BALANCE
+        with patch.object(LiveExecutor, "_load_model"):
+            executor = LiveExecutor(model_name="test", live_mode=False)
+            assert executor.paper_portfolio.balance == INITIAL_BALANCE
 
 
 # ============================================================================

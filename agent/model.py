@@ -207,6 +207,10 @@ def make_vec_env(
             clip_obs=10.0,
             clip_reward=10.0,
         )
+        # SB3 >= 2.x ne crée obs_rms que si norm_obs=True.
+        # Forcer l'attribut à None pour éviter AttributeError dans getattr_recursive.
+        if not hasattr(vec_env, "obs_rms"):
+            vec_env.obs_rms = None
         logger.info("VecNormalize appliqué (norm_obs=False, norm_reward=True)")
 
     # Empiler les observations pour donner de la mémoire à l'agent

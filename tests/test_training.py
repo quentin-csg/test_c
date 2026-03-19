@@ -78,7 +78,8 @@ def micro_vec_env(sample_df):
 @pytest.fixture
 def trained_micro_agent(micro_vec_env):
     """Crée et entraîne un agent avec très peu de steps."""
-    agent = create_agent(micro_vec_env, tensorboard_log=None, seed=42)
+    agent = create_agent(micro_vec_env, tensorboard_log=None, seed=42,
+                         use_cnn=False, frame_stack=4)
     agent.learn(total_timesteps=64)
     return agent
 
@@ -302,6 +303,7 @@ class TestTraining:
                 total_timesteps=128,
                 n_envs=1,
                 frame_stack=4,
+                feature_columns=["close"],
                 model_name="test_micro",
                 use_subproc=False,
                 seed=42,
@@ -331,11 +333,15 @@ class TestBacktest:
         """Exécute un backtest complet sur des données simulées."""
         from training.backtest import backtest
 
+        test_features = ["close"]  # feature commune entre train et test
+
         # 1. Créer et entraîner un micro-agent
         vec_env = make_vec_env(
-            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4
+            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4,
+            feature_columns=test_features,
         )
-        agent = create_agent(vec_env, tensorboard_log=None, seed=42)
+        agent = create_agent(vec_env, tensorboard_log=None, seed=42,
+                             use_cnn=False, frame_stack=4)
         agent.learn(total_timesteps=64)
 
         with patch("agent.model.MODELS_DIR", tmp_path):
@@ -353,6 +359,7 @@ class TestBacktest:
             stats = backtest(
                 model_name="backtest_test",
                 frame_stack=4,
+                feature_columns=test_features,
                 save_results=True,
             )
 
@@ -371,10 +378,14 @@ class TestBacktest:
         """Le backtest est déterministe (mode deterministic=True)."""
         from training.backtest import backtest
 
+        test_features = ["close"]
+
         vec_env = make_vec_env(
-            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4
+            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4,
+            feature_columns=test_features,
         )
-        agent = create_agent(vec_env, tensorboard_log=None, seed=42)
+        agent = create_agent(vec_env, tensorboard_log=None, seed=42,
+                             use_cnn=False, frame_stack=4)
         agent.learn(total_timesteps=64)
 
         with patch("agent.model.MODELS_DIR", tmp_path):
@@ -392,6 +403,7 @@ class TestBacktest:
                 stats = backtest(
                     model_name="det_test",
                     frame_stack=4,
+                    feature_columns=test_features,
                     save_results=False,
                 )
                 results.append(stats["total_return_pct"])
@@ -409,11 +421,15 @@ class TestIntegration:
 
     def test_train_then_backtest_pipeline(self, sample_df, tmp_path):
         """Enchaîne entraînement → sauvegarde → backtest."""
+        test_features = ["close"]
+
         # Entraîner
         vec_env = make_vec_env(
-            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4
+            df=sample_df, n_envs=1, use_subproc=False, frame_stack=4,
+            feature_columns=test_features,
         )
-        agent = create_agent(vec_env, tensorboard_log=None, seed=42)
+        agent = create_agent(vec_env, tensorboard_log=None, seed=42,
+                             use_cnn=False, frame_stack=4)
         agent.learn(total_timesteps=128)
 
         with patch("agent.model.MODELS_DIR", tmp_path):
@@ -432,6 +448,7 @@ class TestIntegration:
             stats = backtest(
                 model_name="integ_test",
                 frame_stack=4,
+                feature_columns=test_features,
                 save_results=False,
             )
 

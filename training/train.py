@@ -163,12 +163,14 @@ def train(
             print(f"  → Warm start depuis: {warm_start_model}.zip")
         except FileNotFoundError:
             logger.warning(f"Warm start '{warm_start_model}' introuvable — démarrage à froid")
-            agent = create_agent(env=vec_env, tensorboard_log=TENSORBOARD_LOG_DIR, seed=seed)
+            agent = create_agent(env=vec_env, tensorboard_log=TENSORBOARD_LOG_DIR,
+                                 seed=seed, frame_stack=frame_stack)
     else:
         agent = create_agent(
             env=vec_env,
             tensorboard_log=TENSORBOARD_LOG_DIR,
             seed=seed,
+            frame_stack=frame_stack,
         )
 
     # Callbacks
