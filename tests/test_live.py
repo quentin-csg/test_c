@@ -97,8 +97,8 @@ class TestPaperPortfolio:
         portfolio = PaperPortfolio(initial_balance=10000.0)
         portfolio.execute_order(1.0, current_price=50000.0)
 
-        # Frais = 0.1% de 10000 = 10 USDT
-        assert portfolio.total_fees == pytest.approx(10.0, abs=0.1)
+        # action=1.0 capé à 30% → frais = 0.1% de 3000 = 3 USDT
+        assert portfolio.total_fees == pytest.approx(3.0, abs=0.1)
 
     def test_get_stats(self):
         """Statistiques du portefeuille cohérentes."""

@@ -537,9 +537,9 @@ class TestMaxDrawdownAccuracy:
                 break
 
         stats = env.get_portfolio_stats()
-        # Le drawdown max doit etre environ 10% (110 -> 99)
-        assert stats["max_drawdown_pct"] > 5.0, (
-            f"Le drawdown cumule devrait etre > 5%, got {stats['max_drawdown_pct']:.2f}%"
+        # Avec MAX_POSITION_PCT=30%, un crash de -10% du prix → ~3% drawdown portfolio
+        assert stats["max_drawdown_pct"] > 2.5, (
+            f"Le drawdown cumule devrait etre > 2.5%, got {stats['max_drawdown_pct']:.2f}%"
         )
 
     def test_no_drawdown_when_price_only_rises(self):
@@ -592,5 +592,5 @@ class TestMaxDrawdownAccuracy:
                 break
 
         stats = env.get_portfolio_stats()
-        # Le max drawdown devrait etre ~10% (120 -> 108)
-        assert stats["max_drawdown_pct"] > 8.0
+        # Avec MAX_POSITION_PCT=30%, un crash de -10% du prix → ~3% drawdown portfolio
+        assert stats["max_drawdown_pct"] > 2.5

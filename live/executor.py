@@ -26,16 +26,22 @@ from agent.model import MODEL_FEATURES
 from config.settings import (
     API_KEY,
     API_SECRET,
+    CB_LOOKBACK_MINUTES,
+    CB_PRICE_DROP_THRESHOLD,
+    CB_VOLUME_SPIKE_FACTOR,
     EXCHANGE,
     EXECUTION_INTERVAL_SECONDS,
     FRAME_STACK_SIZE,
     INITIAL_BALANCE,
     LIVE_MODE,
     LOGS_LIVE_DIR,
+    MAX_POSITION_PCT,
     MODELS_DIR,
+    STOP_LOSS_PCT,
     SYMBOL,
     TRADING_FEE,
 )
+from live.circuit_breaker import CircuitBreaker
 from data.pipeline import build_full_pipeline
 from features.scaler import FeatureScaler
 from training.logger import (
@@ -87,6 +93,7 @@ class PaperPortfolio:
         }
 
         if action > 0.05:  # Acheter (zone morte 5%)
+            action = min(action, MAX_POSITION_PCT)  # cap à 30% du cash
             buy_amount_usdt = self.balance * action
             fee = buy_amount_usdt * TRADING_FEE
             net_amount = buy_amount_usdt - fee
@@ -162,9 +169,22 @@ class LiveExecutor:
         self.frame_stack = frame_stack
         self.include_nlp = include_nlp
         self.running = False
+        self.current_price = 0.0
+
+        # Lock pour protéger l'exécution d'ordres contre les accès concurrents
+        self._trading_lock = threading.Lock()
 
         # Paper portfolio (utilisé en mode paper)
         self.paper_portfolio = PaperPortfolio()
+
+        # Circuit breaker intégré
+        self.circuit_breaker = CircuitBreaker(
+            symbol=symbol,
+            price_drop_threshold=CB_PRICE_DROP_THRESHOLD,
+            volume_spike_factor=CB_VOLUME_SPIKE_FACTOR,
+            lookback_minutes=CB_LOOKBACK_MINUTES,
+            live_mode=live_mode,
+        )
 
         # Modèle et scaler chargés une seule fois
         self.agent = None
@@ -319,6 +339,7 @@ class LiveExecutor:
 
         if action > 0.05:
             # Acheter : market order
+            action = min(action, MAX_POSITION_PCT)  # cap à 30% du cash
             balance = self.exchange.fetch_balance()
             usdt_available = balance["USDT"]["free"]
             buy_amount_usdt = usdt_available * action
@@ -436,13 +457,18 @@ class LiveExecutor:
         action, _ = self.agent.predict(obs, deterministic=True)
         action_value = float(action[0][0]) if action.ndim > 1 else float(action[0])
 
-        # 4. Exécuter l'ordre
-        if self.live_mode:
-            order_info = self._execute_live_order(action_value, current_price)
-        else:
-            order_info = self.paper_portfolio.execute_order(
-                action_value, current_price
-            )
+        # 4. Exécuter l'ordre (skip si circuit breaker déclenché)
+        if self.circuit_breaker.triggered:
+            logger.warning("Circuit breaker actif — tick ignoré")
+            return {"action": "skip", "reason": "circuit_breaker_triggered"}
+
+        with self._trading_lock:
+            if self.live_mode:
+                order_info = self._execute_live_order(action_value, current_price)
+            else:
+                order_info = self.paper_portfolio.execute_order(
+                    action_value, current_price
+                )
 
         # Log
         mode_str = "LIVE" if self.live_mode else "PAPER"
@@ -469,6 +495,78 @@ class LiveExecutor:
             "timestamp": datetime.now().isoformat(),
         }
 
+    def _force_close_position(self, reason: str, current_price: float) -> None:
+        """
+        Ferme immédiatement toute la position ouverte (stop-loss ou circuit breaker).
+        Thread-safe grâce au _trading_lock.
+        """
+        with self._trading_lock:
+            if not self.live_mode:
+                if self.paper_portfolio.position > 1e-8:
+                    logger.critical(
+                        f"FORCE CLOSE [{reason}] — "
+                        f"{self.paper_portfolio.position:.6f} BTC @ {current_price:.2f}"
+                    )
+                    self.paper_portfolio.execute_order(-1.0, current_price)
+                    # Mettre à jour live_state.json immédiatement
+                    state_path = LOGS_LIVE_DIR / "live_state.json"
+                    if state_path.exists():
+                        try:
+                            with open(state_path, "r", encoding="utf-8") as f:
+                                state = json.load(f)
+                            stats = self.paper_portfolio.get_stats(current_price)
+                            state["portfolio"].update({
+                                "net_worth": round(stats["net_worth"], 4),
+                                "balance_usdt": round(stats["balance_usdt"], 4),
+                                "position_btc": 0.0,
+                                "position_usdt": 0.0,
+                                "total_return_pct": round(stats["total_return_pct"], 4),
+                                "total_trades": stats["total_trades"],
+                            })
+                            state["open_positions"] = []
+                            state["force_close_reason"] = reason
+                            state["last_updated"] = datetime.now().isoformat()
+                            with open(state_path, "w", encoding="utf-8") as f:
+                                json.dump(state, f, indent=2, default=str)
+                        except Exception as e:
+                            logger.debug(f"_force_close save: {e}")
+            else:
+                logger.critical(f"FORCE CLOSE [LIVE] [{reason}] @ {current_price:.2f}")
+                self._execute_live_order(-1.0, current_price)
+
+    def _circuit_breaker_loop(self, check_interval: int = 60) -> None:
+        """
+        Thread background : surveille les conditions de marché toutes les 60s.
+        Déclenche une fermeture forcée si crash prix ou volume anormal.
+        """
+        while self.running:
+            try:
+                conditions = self.circuit_breaker.check_conditions()
+                triggered = False
+                reason = ""
+
+                if conditions["price_drop_detected"]:
+                    reason = (
+                        f"Chute de prix: {conditions['price_change_pct']*100:.2f}% "
+                        f"en {CB_LOOKBACK_MINUTES}min"
+                    )
+                    triggered = True
+                elif conditions["volume_spike_detected"]:
+                    reason = f"Volume anormal: {conditions['volume_ratio']:.1f}x la moyenne"
+                    triggered = True
+
+                if triggered:
+                    self.circuit_breaker.trigger(reason)
+                    price = conditions.get("current_price") or self.current_price
+                    self._force_close_position(f"Circuit breaker — {reason}", price)
+                    self.running = False
+                    break
+
+            except Exception as e:
+                logger.debug(f"Circuit breaker loop: {e}")
+
+            time.sleep(check_interval)
+
     def _price_update_loop(self, interval_seconds: int = 10) -> None:
         """
         Thread background : met à jour le prix BTC dans live_state.json
@@ -480,6 +578,24 @@ class LiveExecutor:
                 current_price = float(
                     self.exchange.fetch_ticker(self.symbol)["last"]
                 )
+                self.current_price = current_price
+
+                # Vérifier le stop-loss sur la position ouverte
+                if (
+                    not self.circuit_breaker.triggered
+                    and self.paper_portfolio.position > 1e-8
+                    and self.paper_portfolio.entry_price > 0
+                ):
+                    unrealized_pct = (
+                        (current_price - self.paper_portfolio.entry_price)
+                        / self.paper_portfolio.entry_price * 100
+                    )
+                    if unrealized_pct < -STOP_LOSS_PCT:
+                        self._force_close_position(
+                            f"Stop-loss déclenché: {unrealized_pct:.2f}% < -{STOP_LOSS_PCT}%",
+                            current_price,
+                        )
+
                 if state_path.exists():
                     with open(state_path, "r", encoding="utf-8") as f:
                         state = json.load(f)
@@ -543,13 +659,25 @@ class LiveExecutor:
         self.running = True
         tick_count = 0
 
-        # Thread background : mise à jour du prix toutes les 10s
+        # Thread background : mise à jour du prix + stop-loss toutes les 10s
         price_thread = threading.Thread(
             target=self._price_update_loop,
             args=(10,),
             daemon=True,
         )
         price_thread.start()
+
+        # Thread background : circuit breaker toutes les 60s
+        cb_thread = threading.Thread(
+            target=self._circuit_breaker_loop,
+            args=(60,),
+            daemon=True,
+        )
+        cb_thread.start()
+        logger.info(
+            f"Circuit breaker actif — seuil: {CB_PRICE_DROP_THRESHOLD*100:.0f}% "
+            f"en {CB_LOOKBACK_MINUTES}min, stop-loss: -{STOP_LOSS_PCT}%"
+        )
 
         try:
             while self.running:

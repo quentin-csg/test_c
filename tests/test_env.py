@@ -75,11 +75,11 @@ class TestReward(unittest.TestCase):
 
     def test_position_size_penalty(self):
         from agent.reward import position_size_penalty
-        # En dessous du seuil (70%) → aucune pénalité
+        # En dessous du seuil (40%) → aucune pénalité
         self.assertEqual(position_size_penalty(0.1), 0.0)
-        self.assertEqual(position_size_penalty(0.7), 0.0)
+        self.assertEqual(position_size_penalty(0.4), 0.0)
         # Au-dessus du seuil → pénalité négative
-        large = position_size_penalty(0.9)
+        large = position_size_penalty(0.6)
         self.assertLess(large, 0.0)
         # Plus la position est grande, plus la pénalité est grande
         larger = position_size_penalty(1.0)
@@ -187,13 +187,14 @@ class TestTradingEnv(unittest.TestCase):
         env = self._make_env(trading_fee=0.001, slippage_min=0.0, slippage_max=0.0)
         env.reset(seed=42)
 
-        # Achat 100% → le balance doit être quasi-nul (tout dépensé)
+        # Achat avec action=1.0, capé à 30% du cash par MAX_POSITION_PCT
         env.step(np.array([1.0]))
 
         # Les frais doivent avoir été payés
         self.assertGreater(env.total_fees_paid, 0)
-        # Après un achat total, le balance USDT doit être quasi-nul
-        self.assertLess(env.balance, 5.0)  # < 5 USDT restants
+        # Après un achat (30% max), le balance doit avoir baissé mais pas à zéro
+        self.assertLess(env.balance, 5000.0)   # balance a diminué
+        self.assertGreater(env.balance, 3000.0)  # ~70% du cash reste
         # La position BTC doit être non-nulle
         self.assertGreater(env.position, 0)
 
@@ -258,7 +259,8 @@ class TestTradingEnv(unittest.TestCase):
                 break
 
         self.assertTrue(terminated)
-        self.assertLess(info["net_worth"], 10000.0 * 0.1)
+        # Nouveau seuil de ruine = 80% du capital initial
+        self.assertLess(info["net_worth"], 10000.0 * 0.80)
 
     def test_observation_space_check(self):
         """Vérifie que l'observation est dans l'espace défini."""
@@ -372,12 +374,12 @@ class TestTradingEnv(unittest.TestCase):
         self.assertGreaterEqual(unrealized_pnl, -3.0)
 
     def test_position_size_no_small_penalty(self):
-        """Petites positions (< 70%) ne doivent pas être pénalisées."""
+        """Petites positions (< 40%) ne doivent pas être pénalisées."""
         from agent.reward import position_size_penalty
         self.assertEqual(position_size_penalty(0.0), 0.0)
-        self.assertEqual(position_size_penalty(0.5), 0.0)
-        self.assertEqual(position_size_penalty(0.7), 0.0)
-        self.assertLess(position_size_penalty(0.8), 0.0)
+        self.assertEqual(position_size_penalty(0.3), 0.0)
+        self.assertEqual(position_size_penalty(0.4), 0.0)
+        self.assertLess(position_size_penalty(0.5), 0.0)
 
 
 class TestRewardFixes(unittest.TestCase):

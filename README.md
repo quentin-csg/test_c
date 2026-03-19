@@ -258,7 +258,7 @@ La recompense combine :
 - **Sortino ratio** : comme Sharpe mais penalise seulement la volatilite negative
 - **Penalite drawdown** : exponentielle si drawdown > 15%, cappée à -2.0 (stabilite)
 - **Penalite position sizing** : empeche les positions trop grandes
-- **Penalite couts** : frais 0.1% + slippage [0%, 0.05%]
+- **Penalite couts** : frais 0.1% + slippage [0.01%, 0.1%]
 
 Les rewards sont normalisés par **VecNormalize** (`norm_obs=False, norm_reward=True`).
 

@@ -16,7 +16,7 @@ Creer la classe `TradingEnv(gymnasium.Env)` en se basant sur :
   - Zone morte : |action| <= 0.05 = hold
   - Achat : action > 0.05, vente : action < -0.05
   - Frais deduits, slippage aleatoire applique
-  - Terminated si : fin des donnees OU net_worth < 10% du capital initial (ruine)
+  - Terminated si : fin des donnees OU net_worth < 80% du capital initial (drawdown > 20%)
   - Info contient : net_worth, balance, position, total_trades, total_fees_paid
   - A la terminaison, info contient `portfolio_stats` (pour le VecEnv auto-reset)
 - `get_portfolio_stats()` -> dict avec net_worth, total_return_pct, max_drawdown_pct, sharpe_ratio, sortino_ratio, total_trades, total_fees

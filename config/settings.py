@@ -77,8 +77,8 @@ ADX_PERIOD = 14
 # =============================================================================
 INITIAL_BALANCE = 5_000.0          # Capital initial en USDT
 TRADING_FEE = 0.001                # Frais par trade (0.1%)
-SLIPPAGE_MIN = 0.0                 # Slippage minimum (0%)
-SLIPPAGE_MAX = 0.0005              # Slippage maximum (0.05%)
+SLIPPAGE_MIN = 0.0001              # Slippage minimum (0.01%)
+SLIPPAGE_MAX = 0.001               # Slippage maximum (0.1%)
 
 # =============================================================================
 # AGENT RL — PPO (Stable-Baselines3)
@@ -111,7 +111,7 @@ SHARPE_WINDOW = 72                 # Fenêtre glissante pour Sharpe/Sortino (3 j
 MAX_DRAWDOWN_PENALTY = 0.15        # Seuil de drawdown max avant pénalité exponentielle
 DRAWDOWN_PENALTY_CAP = 2.0         # Cap maximum de la pénalité de drawdown
 POSITION_SIZE_PENALTY_FACTOR = 0.1 # Facteur de pénalité pour grosses positions
-POSITION_SIZE_THRESHOLD = 0.7      # position threshold above which penalty applies (70%)
+POSITION_SIZE_THRESHOLD = 0.4      # position threshold above which penalty applies (40%)
 PRICE_POSITION_WINDOW = 20         # window for price vs high/low features
 
 # =============================================================================
@@ -146,10 +146,12 @@ EXECUTION_INTERVAL_SECONDS = 3600  # Exécution toutes les heures (3600s)
 # =============================================================================
 # CIRCUIT BREAKER
 # =============================================================================
-CB_PRICE_DROP_THRESHOLD = 0.03    # Coupe si chute > 3% en quelques minutes
+CB_PRICE_DROP_THRESHOLD = 0.03    # Coupe si chute > 3% sur la fenêtre
 CB_VOLUME_SPIKE_FACTOR = 5.0      # Coupe si volume > 5x la moyenne
-CB_CHECK_INTERVAL = "1m"          # Timeframe de surveillance WebSocket
-CB_LOOKBACK_MINUTES = 5           # Fenêtre de détection (5 dernières minutes)
+CB_CHECK_INTERVAL = "1m"          # Timeframe de surveillance
+CB_LOOKBACK_MINUTES = 30          # Fenêtre de détection (30 dernières minutes)
+STOP_LOSS_PCT = 3.0               # Stop-loss par position : fermer si PnL latent < -3%
+MAX_POSITION_PCT = 0.30           # Taille max d'un achat : 30% du cash disponible
 
 # =============================================================================
 # DASHBOARD (Streamlit)
