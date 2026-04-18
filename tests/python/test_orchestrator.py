@@ -11,18 +11,33 @@ from bot.orchestrator import Orchestrator
 
 # ── Fake async receiver ────────────────────────────────────────────────────────
 
-class FakeReceiver:
-    def __init__(self, ticks):
-        self._it = iter(ticks)
+class _FakeBatchReceiver:
+    """Wraps a tick iterator and yields single-element lists (mirrors BatchReceiver)."""
+    def __init__(self, it):
+        self._it = it
 
     def __aiter__(self):
         return self
 
     async def __anext__(self):
         try:
-            return next(self._it)
+            return [next(self._it)]
         except StopIteration:
             raise StopAsyncIteration
+
+
+class FakeReceiver:
+    def __init__(self, ticks):
+        self._ticks = list(ticks)
+
+    def __aiter__(self):
+        return _FakeBatchReceiver(iter(self._ticks))
+
+    async def __anext__(self):
+        raise StopAsyncIteration  # direct iteration unused — use batches()
+
+    def batches(self, batch_size: int = 32) -> "_FakeBatchReceiver":
+        return _FakeBatchReceiver(iter(self._ticks))
 
 
 def _tick(market: str, price: str, fr: str) -> dict:
@@ -75,12 +90,14 @@ def _settings(**kw) -> Settings:
         bot_mode=BotMode.paper,
         funding_entry_apr=Decimal("0.10"),
         funding_exit_apr=Decimal("0.03"),
+        kelly_fraction=Decimal("0.5"),
         max_notional_usdt=Decimal("500"),
         margin_buffer_mult=Decimal("3"),
         max_delta_pct=Decimal("0.02"),
         stale_tick_seconds=5,
         log_level="WARNING",
         binance_testnet=True,
+        state_file=None,
     )
     defaults.update(kw)
     return Settings.model_construct(**defaults)

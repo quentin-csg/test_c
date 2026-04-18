@@ -63,6 +63,8 @@ class CashCarryStrategy:
             log.warning("perp_mid_zero", perp_bid=str(perp_bid), perp_ask=str(perp_ask))
             return Signal.NONE
         spread_pct = (perp_ask - perp_bid) / perp_mid
+        if spread_pct < 0:
+            return Signal.NONE
 
         if not self.state.in_position:
             if funding_apr >= self.cfg.entry_apr and spread_pct <= self.cfg.max_spread_pct:

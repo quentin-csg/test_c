@@ -18,8 +18,9 @@ use crate::types::{Market, Tick};
 ///
 /// Usage from Python:
 ///   receiver = await create_market_data_receiver("btcusdt", testnet=True)
-///   async for tick in receiver:
-///       print(tick)
+///   async for batch in receiver.batches(32):
+///       for tick in batch:
+///           print(tick)
 #[pyclass]
 struct MarketDataReceiver {
     rx: Arc<Mutex<broadcast::Receiver<Tick>>>,
@@ -32,7 +33,6 @@ impl MarketDataReceiver {
     }
 
     fn __anext__<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // Clone the Arc (cheap) so the async block owns its own handle to the receiver.
         let rx = Arc::clone(&self.rx);
         future_into_py(py, async move {
             loop {
@@ -48,6 +48,71 @@ impl MarketDataReceiver {
                     }
                 }
             }
+        })
+    }
+
+    /// Return a batching async iterable that drains up to `batch_size` ticks per
+    /// GIL acquisition.  Prefer this over plain `__anext__` at high tick rates.
+    #[pyo3(signature = (batch_size = 32))]
+    fn batches(&self, batch_size: usize) -> BatchReceiver {
+        BatchReceiver { rx: Arc::clone(&self.rx), batch_size }
+    }
+}
+
+/// Async iterable that yields `list[dict]` — one GIL acquisition per batch.
+///
+/// Usage from Python:
+///   async for batch in receiver.batches(32):
+///       for tick in batch:
+///           process(tick)
+#[pyclass]
+struct BatchReceiver {
+    rx: Arc<Mutex<broadcast::Receiver<Tick>>>,
+    batch_size: usize,
+}
+
+#[pymethods]
+impl BatchReceiver {
+    fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __anext__<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let rx = Arc::clone(&self.rx);
+        let batch_size = self.batch_size;
+        future_into_py(py, async move {
+            let mut ticks: Vec<Tick> = Vec::with_capacity(batch_size);
+            {
+                let mut guard = rx.lock().await;
+                // Block until at least one tick arrives.
+                loop {
+                    match guard.recv().await {
+                        Ok(tick) => { ticks.push(tick); break; }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("Python consumer lagged by {n} ticks");
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            return Err(pyo3::exceptions::PyStopAsyncIteration::new_err("channel closed"));
+                        }
+                    }
+                }
+                // Drain additional available ticks without blocking.
+                while ticks.len() < batch_size {
+                    match guard.try_recv() {
+                        Ok(tick) => ticks.push(tick),
+                        Err(_) => break,
+                    }
+                }
+            }
+            // Single GIL acquisition for the whole batch.
+            Python::with_gil(|py| {
+                let list = pyo3::types::PyList::empty_bound(py);
+                for tick in &ticks {
+                    list.append(tick_to_pydict(py, tick)?)?;
+                }
+                Ok(list.into_py(py))
+            })
         })
     }
 }
@@ -102,6 +167,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         .try_init();
 
     m.add_class::<MarketDataReceiver>()?;
+    m.add_class::<BatchReceiver>()?;
     m.add_function(wrap_pyfunction!(create_market_data_receiver, m)?)?;
     Ok(())
 }

@@ -78,11 +78,12 @@ async fn run_spot_stream(url: String, symbol: String, tx: broadcast::Sender<Tick
     loop {
         match connect_and_stream_spot(&url, &symbol, &tx).await {
             Ok(()) => {
-                tracing::info!("spot WS closed cleanly, reconnecting");
+                tracing::info!(market = "spot", "ws_reconnect: closed cleanly");
                 backoff = Duration::from_secs(1);
             }
             Err(e) => {
-                tracing::warn!("spot WS error: {e:#}, reconnecting in {backoff:?}");
+                tracing::warn!(market = "spot", backoff_ms = backoff.as_millis() as u64,
+                               "ws_reconnect: {e:#}");
                 // Jitter: mix low bits of current ms into the delay to avoid
                 // thundering-herd when multiple tasks reconnect simultaneously.
                 let jitter_ms = crate::types::now_ms() % 500;
@@ -166,11 +167,12 @@ async fn run_futures_stream(url: String, symbol: String, tx: broadcast::Sender<T
     loop {
         match connect_and_stream_futures(&url, &symbol, &tx).await {
             Ok(()) => {
-                tracing::info!("futures WS closed cleanly, reconnecting");
+                tracing::info!(market = "futures", "ws_reconnect: closed cleanly");
                 backoff = Duration::from_secs(1);
             }
             Err(e) => {
-                tracing::warn!("futures WS error: {e:#}, reconnecting in {backoff:?}");
+                tracing::warn!(market = "futures", backoff_ms = backoff.as_millis() as u64,
+                               "ws_reconnect: {e:#}");
                 let jitter_ms = crate::types::now_ms() % 500;
                 sleep(backoff + Duration::from_millis(jitter_ms)).await;
                 backoff = (backoff * 2).min(MAX_BACKOFF);

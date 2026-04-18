@@ -1,0 +1,23 @@
+groups:
+  - name: mn-bot-alerts
+    interval: 1m
+    rules:
+      - alert: HighRiskErrorRate
+        expr: |
+          sum(count_over_time({app="mn-bot"} |= "RiskError" [5m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RiskError detected in the last 5 minutes"
+          description: "At least one RiskError was logged. Check kill-switch, delta, or margin status."
+
+      - alert: ExcessiveWsReconnects
+        expr: |
+          sum(count_over_time({app="mn-bot"} |= "ws_reconnect" [1h])) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 3 WS reconnects in the last hour"
+          description: "WebSocket instability detected. Check network connectivity and Binance WS status."

@@ -1,5 +1,6 @@
 from decimal import Decimal
 from enum import Enum
+from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,8 +37,15 @@ class Settings(BaseSettings):
     recv_window_ms: int = Field(default=5000, gt=0, le=60000)
     backtest_slippage_pct: Decimal = Decimal("0.0005")
 
+    # Strategy
+    kelly_fraction: Decimal = Decimal("0.5")
+
     # Logging
     log_level: str = "INFO"
+    log_file: Path | None = None  # if set, JSON logs are tee'd here (rotated at 50 MB)
+
+    # State persistence: equity + position survives restarts
+    state_file: Path | None = None  # e.g. Path("portfolio_state.json")
 
     @field_validator("binance_api_key", "binance_api_secret", mode="before")
     @classmethod

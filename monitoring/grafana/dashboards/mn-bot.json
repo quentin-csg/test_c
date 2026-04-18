@@ -1,0 +1,120 @@
+{
+  "title": "mn-bot",
+  "uid": "mn-bot-main",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "RiskErrors (last 5 min)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({app=\"mn-bot\"} |= \"RiskError\" [5m]))",
+          "legendFormat": "RiskErrors"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "WS Reconnects (last 1 h)",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "red", "value": 4 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({app=\"mn-bot\"} |= \"ws_reconnect\" [1h]))",
+          "legendFormat": "Reconnects"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Open Positions (last 1 h)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({app=\"mn-bot\"} |= \"open_position\" [1h]))",
+          "legendFormat": "Entries"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Closed Positions (last 1 h)",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "sum(count_over_time({app=\"mn-bot\"} |= \"close_position\" [1h]))",
+          "legendFormat": "Exits"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Trading Signals",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "options": { "showTime": true, "sortOrder": "Descending", "wrapLogMessage": false },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "{app=\"mn-bot\"} | json | event =~ \"open_position|close_position|paper_fill_open|paper_fill_close\"",
+          "legendFormat": ""
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Risk & WS Events",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+      "options": { "showTime": true, "sortOrder": "Descending", "wrapLogMessage": false },
+      "targets": [
+        {
+          "datasource": "Loki",
+          "expr": "{app=\"mn-bot\"} | json | level =~ \"warning|error\"",
+          "legendFormat": ""
+        }
+      ]
+    }
+  ]
+}

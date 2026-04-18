@@ -32,7 +32,7 @@ def run_vectorbt(start: str, end: str) -> None:
     klines = _load_klines(start, end)
 
     # Resample klines to 8h to align with funding periods.
-    price_8h = klines["close"].resample("8h").last().reindex(funding.index, method="ffill")
+    price_8h = klines["close"].resample("8h").last().reindex(funding.index).ffill()
 
     funding_apr = funding["fundingRate"] * FUNDINGS_PER_DAY * DAYS_PER_YEAR
 

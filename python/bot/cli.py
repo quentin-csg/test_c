@@ -18,13 +18,21 @@ def run(
 
     configure_logging()  # early logging before Settings instantiation
     settings = Settings(bot_mode=BotMode(mode))
-    configure_logging(settings.log_level)  # reconfigure with correct level from env
+    configure_logging(settings.log_level, settings.log_file)  # reconfigure with level + file sink
 
     if settings.bot_mode == BotMode.live:
         settings.require_credentials()
 
     orchestrator = Orchestrator(settings)
-    asyncio.run(orchestrator.run())
+    try:
+        asyncio.run(orchestrator.run())
+    except KeyboardInterrupt:
+        log.warning("shutdown_requested", mode=settings.bot_mode.value)
+        if settings.bot_mode == BotMode.live:
+            log.warning(
+                "live_check_required",
+                msg="Bot stopped while in live mode — verify open orders on Binance manually",
+            )
 
 
 @app.command()
