@@ -7,7 +7,7 @@ venv/
 .env
 .env.local
 *.db
-TODO.md
+todo.md
 *.db-journal
 *.sqlite
 /data/
