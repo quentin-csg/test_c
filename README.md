@@ -1,85 +1,213 @@
-# Trading Bot RL
+# mn-bot — Market-Neutral BTC Cash-and-Carry Bot
 
-Bot de trading crypto basé sur **PPO** (Proximal Policy Optimization) avec CNN 1D, walk-forward validation, et dashboard temps réel. 100% local et gratuit.
+Automated cash-and-carry trading bot for BTC on Binance. Captures perpetual funding rates by simultaneously holding a long spot position and a short perpetual futures position, staying delta-neutral while collecting funding payments every 8 hours.
 
-**Stack :** Python 3.10+ · Stable-Baselines3 · Gymnasium · FinBERT · ccxt · Streamlit
+**Status: paper trading ready — not yet validated for live trading.**
 
 ---
 
-## Installation
+## How it works
+
+When BTC perpetual funding is high (longs pay shorts), the bot:
+
+1. **Enters**: buys spot BTC + shorts the same notional on BTCUSDT perp
+2. **Holds**: collects funding payments every 8h (annualized target > 10% APR)
+3. **Exits**: when funding drops below 3% APR or reverses
+
+Net exposure to BTC price is near zero. Profit comes from the funding spread minus trading fees.
+
+---
+
+## Architecture
+
+```
+rust_core/          Rust crate compiled as Python extension (PyO3)
+  market_data.rs    WebSocket streams: spot bookTicker + perp markPrice
+  execution.rs      Binance REST API, HMAC-SHA256 signed orders
+  order_book.rs     L2 order book, BTreeMap, VWAP
+  types.rs          Shared types: Tick, Order, Market
+
+python/
+  bot/
+    strategy.py     Entry/exit signals, Kelly position sizing
+    risk.py         5 safety gates (stale data, HALT, delta, margin, reverse funding)
+    orchestrator.py Main event loop, paper/live fills, PnL tracking
+    config.py       Pydantic settings with validation
+    cli.py          mn-bot CLI entry point
+  backtest/
+    data_loader.py  Binance klines + funding history download
+    event_engine.py Event-driven backtest (shares strategy.py with live)
+    vectorbt_runner.py Vectorized backtest for quick exploration
+
+tests/python/       24 pytest tests, all green
+```
+
+---
+
+## Requirements
+
+- Python 3.10+
+- Rust stable (1.75+) — for building the WebSocket/execution core
+- Windows, macOS, or Linux
+
+### Install Rust
 
 ```bash
-pip install -r requirements.txt
-```
+# Windows
+winget install Rustlang.Rustup
 
-> Le modèle FinBERT (`ProsusAI/finbert`, ~500 Mo) est téléchargé automatiquement au premier lancement avec `--nlp`.
+# macOS / Linux
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
 
 ---
 
-## Utilisation
+## Setup
 
 ```bash
-# 1. Entraînement (1M steps, BTC/USDT 1h, 2020-2023)
-python main.py train --model mon_modele
+git clone https://github.com/your-username/mn-bot.git
+cd mn-bot
 
-# 2. Backtest rapide (données 2024+)
-python main.py backtest --model mon_modele
+# Create virtualenv and install Python dependencies
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS / Linux
 
-# 3. Walk-forward validation (expanding window, plusieurs heures)
-python main.py walk-forward
+pip install maturin
 
-# 4. Paper trading (tick toutes les heures, Ctrl+C pour arrêter)
-python main.py live --model mon_modele
+# Build the Rust extension and install the package
+maturin develop --release
 
-# 5. Live trading (argent réel — tester en paper d'abord !)
-python main.py live --model mon_modele --live-mode
-
-# Dashboard Streamlit (port 8501)
-python main.py dashboard
-
-# Visualiser l'entraînement
-tensorboard --logdir logs/train/tensorboard
+pip install -e "python/[dev]"
 ```
 
-Pour le live trading, définir les clés API en variables d'environnement :
+---
+
+## Configuration
+
+Create a `.env` file at the project root:
+
+```env
+# Required for live mode only — paper trading does not need API keys
+BINANCE_API_KEY=your_key_here
+BINANCE_API_SECRET=your_secret_here
+BINANCE_TESTNET=false
+
+BOT_MODE=paper
+
+# Strategy thresholds (APR as decimal)
+FUNDING_ENTRY_APR=0.07     # enter when funding > 7% APR
+FUNDING_EXIT_APR=0.03      # exit when funding < 3% APR
+
+# Risk
+MAX_NOTIONAL_USDT=500      # max position size in USDT
+MAX_DELTA_PCT=0.02          # max allowed imbalance between legs
+MARGIN_BUFFER_MULT=3.0      # required free margin = maintenance * 3
+
+LOG_LEVEL=INFO
+```
+
+---
+
+## Usage
+
+### Paper trading (no account needed)
+
+Connects to live Binance WebSocket streams, simulates fills locally without placing any real orders.
 
 ```bash
-export EXCHANGE_API_KEY=...
-export EXCHANGE_API_SECRET=...
+mn-bot run --mode paper
+```
+
+### Backtest
+
+Download historical data first (public Binance API, no auth required):
+
+```bash
+mn-bot download --start 2024-10-01 --end 2025-01-01
+```
+
+Run the event-driven backtest (canonical, simulates fees and funding payments):
+
+```bash
+mn-bot backtest --engine event
+```
+
+Quick vectorized exploration (no fees, approximate):
+
+```bash
+mn-bot backtest --engine vectorbt
+```
+
+### Live trading
+
+Requires Binance API keys and testnet validation first.
+
+```bash
+mn-bot run --mode live
 ```
 
 ---
 
-## Métriques clés
+## Kill switch
 
-| Métrique | Bon | Mauvais |
-| --- | --- | --- |
-| Total return | > 0% | < -10% |
-| Sharpe ratio | > 1.0 | < 0 |
-| Max drawdown | < 15% | > 25% |
-| Nombre de trades | 50–300 | 0 ou > 500 |
+Drop a `HALT` file at the project root to stop the bot after the current tick:
 
-Le **walk-forward** est la validation la plus fiable : il ré-entraîne et backteste sur plusieurs fenêtres temporelles successives. Un Sharpe moyen > 0.5 stable sur tous les folds est un bon signal.
-
----
-
-## Structure
-
-```
-├── config/settings.py       # Hyperparamètres et configuration
-├── data/                    # Fetchers (ccxt, yfinance, Fear&Greed, RSS)
-├── features/                # Indicateurs techniques, FinBERT, scaler
-├── env/trading_env.py       # Environnement Gymnasium
-├── agent/                   # PPO + CNN 1D + reward
-├── training/                # Train, backtest, walk-forward, logger
-├── live/                    # Executor, circuit breaker, dashboard
-├── models/                  # Modèles sauvegardés (.zip)
-├── logs/                    # TensorBoard, backtests, walk-forward
-└── main.py                  # CLI principal
+```bash
+touch HALT      # bot stops immediately
+rm HALT         # re-enables trading
 ```
 
 ---
 
-## Licence
+## Risk gates
 
-Projet personnel — usage libre.
+Every signal passes through 5 checks before execution:
+
+| Gate | What it checks |
+|---|---|
+| Stale data | No tick received for > 5 seconds |
+| HALT file | Presence of `./HALT` stops all orders |
+| Delta neutrality | `\|long - short\| / equity < 2%` |
+| Margin buffer | `free_margin > maintenance_margin × 3` |
+| Reverse funding | APR < -2% forces immediate exit |
+
+---
+
+## Default parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `FUNDING_ENTRY_APR` | 0.07 | Enter above this APR |
+| `FUNDING_EXIT_APR` | 0.03 | Exit below this APR |
+| `MAX_NOTIONAL_USDT` | 500 | Max position size |
+| `MAX_DELTA_PCT` | 0.02 | Max delta imbalance |
+| `MARGIN_BUFFER_MULT` | 3.0 | Margin safety multiplier |
+| `STALE_TICK_SECONDS` | 5 | Data freshness threshold |
+| Kelly fraction | 0.5 | Position sizing conservatism |
+
+---
+
+## Development
+
+```bash
+# Run tests
+pytest tests/python -v
+
+# Rust tests
+cargo test -p rust_core
+
+# Lint
+ruff check python/
+cargo clippy --all-targets -- -D warnings
+
+# Format
+ruff format python/
+cargo fmt
+```
+
+---
+
+## Disclaimer
+
+This software is for educational purposes. Trading perpetual futures carries significant risk of loss. The authors are not responsible for any financial losses incurred by using this software.
